@@ -273,7 +273,7 @@ async function readHermesTranscript(
     args.beforeOffset === undefined
       ? messages.slice(-Math.max(0, args.limit))
       : messages
-          .filter((message) => Number(message.id) < args.beforeOffset)
+          .filter((message) => Number(message.id) < (args.beforeOffset ?? Number.MAX_SAFE_INTEGER))
           .slice(-Math.max(0, args.limit))
   return {
     messages: selected,
