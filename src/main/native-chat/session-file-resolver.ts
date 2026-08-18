@@ -9,6 +9,7 @@ import { isWslUncPath } from '../../shared/wsl-paths'
 import { walkSessionFiles } from '../ai-vault/session-scanner-discovery'
 import { OMP_SESSION_ARTIFACT_DIR_PATTERN } from '../ai-vault/session-scanner-omp-subagent-transcripts'
 import { normalizeAgentSessionsDir } from '../ai-vault/session-scanner-values'
+import { hasHermesSession } from './hermes-state-db-reader'
 import { resolveOrcaManagedCodexHomePath } from '../codex/codex-home-paths'
 import {
   findGrokChatHistoryBySessionId,
@@ -57,6 +58,13 @@ function ompSessionsDir(): string {
   )
 }
 
+const hermesHome = (): string => process.env.HERMES_HOME?.trim() || join(homedir(), '.hermes')
+const hermesStateDb = (): string => join(hermesHome(), 'state.db')
+
+function hermesSessionsDir(): string {
+  return join(hermesHome(), 'sessions')
+}
+
 export type ResolveSessionFileOptions = {
   /** Override the Claude projects root (used by tests / isolated scans). */
   claudeProjectsDir?: string
@@ -67,6 +75,8 @@ export type ResolveSessionFileOptions = {
   grokSessionsDir?: string
   /** Override the omp sessions root (`~/.omp/agent/sessions`). */
   ompSessionsDir?: string
+  /** Override the Hermes sessions root (tests / isolated scans). */
+  hermesSessionsDir?: string
   /** Authoritative transcript path reported by the agent hook
    *  (`providerSession.transcriptPath`). When set and the file exists, it is used
    *  directly — recent Claude Code names the transcript with a UUID that differs
@@ -157,6 +167,13 @@ async function resolveSessionFileById(
   }
   if (transcriptAgent === 'omp') {
     return resolveOmpSessionFile(trimmedId, options.ompSessionsDir ?? ompSessionsDir(), signal)
+  }
+  if (transcriptAgent === 'hermes') {
+    return resolveHermesSessionFile(
+      trimmedId,
+      options.hermesSessionsDir ?? hermesSessionsDir(),
+      signal
+    )
   }
   // Why: a new transcript agent must pick its own resolver. Falling through to
   // OMP's scan would search the wrong root with a foreign session id, so fail
@@ -287,4 +304,19 @@ async function resolveOmpSessionFile(
     signal
   })
   return files[0] ?? null
+}
+
+/**
+ * Hermes stores current sessions in state.db, not a transcript directory. The
+ * resolver returns the database path because the transcript reader opens it
+ * read-only and selects messages by session_id.
+ */
+async function resolveHermesSessionFile(
+  sessionId: string,
+  _sessionsDir: string,
+  signal?: AbortSignal
+): Promise<string | null> {
+  signal?.throwIfAborted()
+  const path = hermesStateDb()
+  return existsSync(path) && hasHermesSession(path, sessionId) ? path : null
 }
